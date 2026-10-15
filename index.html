@@ -97,16 +97,21 @@ async function showApp(){
  await loadContacts();await setupPresence();
 }
 async function loadContacts(){
+ // Always show the complete 001–033 directory, even if profiles cannot be read.
+ // Only registered profiles have an id and can be opened for real messaging.
  const {data,error}=await supabase.from('profiles').select('id,code,display_name,last_seen').order('code');
- if(error){$('contacts').innerHTML='<div class="empty">خطا در دریافت مخاطبان. تنظیمات دیتابیس را بررسی کن.</div>';return}
- const registered=new Map((data||[]).map(p=>[p.code,p]));
- contacts=codes.filter(code=>code!==me.code).map(code=>registered.get(code)||{id:null,code,display_name:'کاربر '+code,last_seen:null});
+ const registered=new Map((!error && data ? data : []).map(p=>[p.code,p]));
+ contacts=codes.map(code=>{
+   if(code===me.code) return {id:null,code,display_name:(me.display_name||'شما')+' (شما)',last_seen:null,self:true};
+   return registered.get(code)||{id:null,code,display_name:'کاربر '+code,last_seen:null};
+ });
  $('contactCount').textContent=faNum(contacts.length);renderContacts();
+ if(error) console.warn('NOVA contacts query failed; showing local directory instead:',error.message);
 }
 function renderContacts(){
  const q=$('search').value.trim().toLocaleLowerCase('fa');
  const list=contacts.filter(p=>(p.display_name+' '+p.code).toLocaleLowerCase('fa').includes(q));
- $('contacts').innerHTML=list.map(p=>`<button class="contact ${activePeer?.id===p.id?'active':''}" data-id="${p.id||''}" ${p.id?'':'disabled style="opacity:.58;cursor:default"'}><div class="avatar">${esc(avatar(p.display_name))}</div><div class="contact-info"><b>${esc(p.display_name)}</b><small>${!p.id?'هنوز وارد نشده':(presenceMap.has(p.id)?'آنلاین':'کد '+esc(p.code))}</small></div><i class="presence ${presenceMap.has(p.id)?'on':''}"></i></button>`).join('')||'<div class="empty">مخاطبی پیدا نشد.</div>';
+ $('contacts').innerHTML=list.map(p=>`<button class="contact ${activePeer?.id===p.id?'active':''}" data-id="${p.id||''}" ${p.id?'':'disabled style="opacity:.58;cursor:default"'}><div class="avatar">${esc(avatar(p.display_name))}</div><div class="contact-info"><b>${esc(p.display_name)}</b><small>${p.self?'حساب شما':(!p.id?'هنوز ثبت‌نام نکرده':(presenceMap.has(p.id)?'آنلاین':'کد '+esc(p.code)))}</small></div><i class="presence ${presenceMap.has(p.id)?'on':''}"></i></button>`).join('')||'<div class="empty">مخاطبی پیدا نشد.</div>';
  $('contacts').querySelectorAll('[data-id]').forEach(b=>{if(b.dataset.id)b.addEventListener('click',()=>openChat(b.dataset.id))});
 }
 $('search').addEventListener('input',renderContacts);
@@ -131,13 +136,13 @@ function appendMessage(m){
  if($('messages').querySelector(`[data-message-id="${m.id}"]`))return;
  const empty=$('messages').querySelector('.empty');if(empty)empty.remove();
  const mine=m.sender_id===me.id,el=document.createElement('div');el.className='msg '+(mine?'mine':'');el.dataset.messageId=m.id;
- const bubble=document.createElement('div');bubble.className='bubble';bubble.textContent=m.body;
+ const bubble=document.createElement('div');bubble.className='bubble';bubble.textContent=m.message_text;
  const meta=document.createElement('div');meta.className='meta';meta.textContent=timeLabel(m.created_at);bubble.append(meta);el.append(bubble);$('messages').append(el);$('messages').scrollTop=$('messages').scrollHeight;
 }
 $('compose').addEventListener('submit',async e=>{
  e.preventDefault();const body=$('messageInput').value.trim();if(!body||!activePeer)return;
  $('messageInput').value='';$('messageInput').focus();
- const {data,error}=await supabase.from('messages').insert({sender_id:me.id,receiver_id:activePeer.id,body}).select().single();
+ const {data,error}=await supabase.from('messages').insert({sender_id:me.id,receiver_id:activePeer.id,message_text:body}).select().single();
  if(error){status('ارسال پیام انجام نشد. اتصال یا سیاست‌های دیتابیس را بررسی کن.','error');$('messageInput').value=body;return}
  appendMessage(data);
 });
